@@ -1,0 +1,9 @@
+data/
+*.rds
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+.DS_Store
+slides/*.pdf
+slides/*.jpg
