@@ -1,0 +1,282 @@
+---
+title: "RQ2"
+format: html
+---
+
+Let's follow the four tasks:
+
+1. Identify the 18 GEP genes and examine their expression in the dataset
+2. Calculate a GEP score for each patient
+3. Test whether patients with a higher GEP score are more likely to respond
+4. Interpret the result and discuss why a high GEP does not guarantee response
+
+## 0. Setup
+
+```{r}
+# Set up working directory
+
+root <- ".."
+fig_dir <- file.path(root, "results", "figures")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r}
+#| warning: false
+# Load libraries and data
+
+library(ggplot2)
+library(patchwork)
+
+d        <- readRDS(file.path(root, "data", "IMvigor210_plain.rds"))
+tpm      <- as.matrix(d$tpm)
+counts   <- as.matrix(d$counts)
+clinical <- as.data.frame(d$clinical)
+```
+
+```{r}
+# Basic data processing
+
+clinical$BOR <- factor(clinical$BOR, levels = c("NR", "R"))
+clinical$resp <- as.integer(clinical$BOR == "R") # a numeric flag for responders
+
+rownames(clinical) <- clinical$sample_id
+
+logtpm <- log2(tpm + 1)
+
+# Make sure patients are in the same order in the expression matrix and the clinical table
+logtpm <- logtpm[, clinical$sample_id]
+
+table(clinical$BOR)
+```
+
+## Task 1: Identify the 18 GEP genes and examine their expression in the dataset
+
+In the paper from Ayers et al. the GEP list consists in the following list:
+
+```{r}
+# GEP genes
+
+GEP_genes <- c(
+  "CD27", "CD274", "PDCD1", "CD276", "CD8A", "CMKLR1",
+  "CXCL9", "CXCR6", "HLA-DQA1", "HLA-DRB1", "HLA-E",
+  "IDO1", "LAG3", "NKG7", "PDCD1LG2", "PSMB10", "STAT1", "TIGIT"
+)
+```
+
+Note: this is the list from Exercise 6. The list published by Ayers et al. (2017) has CCL5 instead of PDCD1. We keep the course list here.
+
+```{r}
+# Are genes present?
+
+GEP_genes_present <- GEP_genes[GEP_genes %in% rownames(tpm)]
+
+cat("GEP genes present:", length(GEP_genes_present), "of", length(GEP_genes), "\n")
+```
+All genes are present in the dataset (hopefully!!). Let's focus on their
+expression now
+
+We use log2(TPM + 1) and not raw counts. TPM is corrected for sequencing depth and gene length, so values can be compared between patients. The log makes the distribution less skewed.
+
+```{r}
+# Extract GEP genes expression in the dataset
+
+X <- logtpm[GEP_genes_present, , drop = FALSE]   # 18 genes x 192 patients
+
+# Median expression of each gene across all patients
+sort(round(apply(X, 1, median), 2), decreasing = TRUE)
+```
+
+```{r}
+# Expression of the 18 GEP genes in responders vs non-responders
+
+R  <- clinical$BOR == "R"
+NR <- clinical$BOR == "NR"
+
+gene_tab <- data.frame(
+  gene      = rownames(X),
+  mean_R    = rowMeans(X[, R]),
+  mean_NR   = rowMeans(X[, NR]),
+  log2FC    = rowMeans(X[, R]) - rowMeans(X[, NR]),   # difference of log2 values = log2 fold change
+  p_value   = apply(X, 1, function(x) wilcox.test(x[R], x[NR])$p.value)
+)
+gene_tab$FDR <- p.adjust(gene_tab$p_value, method = "BH")   # correct for 18 tests
+
+# Sort the genes by p-value (most different first)
+gene_tab <- gene_tab[order(gene_tab$p_value), ]
+rownames(gene_tab) <- NULL
+knitr::kable(gene_tab, digits = 3)
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+# Boxplots of each gene, R vs NR
+
+long <- data.frame(
+  gene = factor(rep(rownames(X), times = ncol(X)), levels = gene_tab$gene),
+  expr = as.vector(X),
+  BOR  = rep(clinical$BOR, each = nrow(X))
+)
+
+p_genes <- ggplot(long, aes(BOR, expr, fill = BOR)) +
+  geom_boxplot(outlier.size = 0.5, alpha=0.5) +
+  geom_jitter(width = 0.15, size = 0.4, alpha = 0.4) +
+  facet_wrap(~ gene, scales = "free_y", ncol = 6) +
+  scale_fill_manual(values = c(NR = "grey70", R = "#D55E00")) +
+  labs(x = NULL, y = "log2(TPM + 1)") +
+  theme_bw() +
+  theme(legend.position = "none")
+p_genes
+ggsave(file.path(fig_dir, "gep_genes_boxplots.png"), p_genes, width = 10, height = 8, dpi = 300)
+```
+
+
+**Analysis:**
+Most of the GEP genes ar overexpressed for responders: only CD276 and HLA-DQA1 aren't. They are also the two bottom ranked genes according to their GEP scores. All genes also have a signficant FDR, less than 0.05, except the last two genes and HLA-DRB1, which is the top 3 bottom ranked gene.
+
+
+## 2. Calculate a GEP score for each patient
+
+For this task, we use the scoring from the course (Exercise 6): standardise each gene across patients (z-score), then average the 18 z-scores for each patient. Standardising first gives every gene the same weight, so highly expressed genes such as HLA-E or STAT1 do not dominate.
+
+```{r}
+# GEP score
+
+Z <- t(scale(t(X)))          # z-score each gene across patients
+clinical$GEP <- colMeans(Z)
+
+summary(clinical$GEP)
+```
+
+Let's try to reproduce the heatmap from the paper, with the 18 genes ordered by
+GEP score
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5.5
+# Z-scored expression of the 18 GEP genes. Patients are sorted by GEP score
+
+ord_s <- order(clinical$GEP)                    # patients: low to high GEP
+ord_g <- order(cor(t(Z), clinical$GEP))         # genes: least to most correlated with the score
+Zc <- pmax(pmin(Z, 2.5), -2.5)                  # cap for display only
+
+hm <- data.frame(sample = factor(rep(colnames(Zc), each = nrow(Zc)), levels = colnames(Zc)[ord_s]),
+                 gene   = factor(rep(rownames(Zc), ncol(Zc)), levels = rownames(Zc)[ord_g]),
+                 z      = as.vector(Zc))
+p_hm <- ggplot(hm, aes(sample, gene, fill = z)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#0072B2", mid = "white", high = "#D55E00", midpoint = 0) +
+  labs(x = "Patients (sorted by GEP score)", y = NULL, fill = "z-score") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        panel.grid = element_blank())
+
+strip <- data.frame(sample = factor(clinical$sample_id, levels = colnames(Zc)[ord_s]),
+                    BOR = clinical$BOR)
+p_strip <- ggplot(strip, aes(sample, 1, fill = BOR)) +
+  geom_tile() +
+  scale_fill_manual(values = c(NR = "grey90", R = "#D55E00")) +
+  labs(x = NULL, y = NULL, fill = "Response") +
+  theme_void()
+
+p_heat <- p_strip / p_hm + plot_layout(heights = c(1, 12), guides = "collect")
+p_heat
+ggsave(file.path(fig_dir, "gep_heatmap.png"), p_heat, width = 10, height = 5.5, dpi = 300)
+```
+
+**Analysis:**
+The heatmap shows a clear gradient: patients go from "cold" (all genes low) to "inflamed" (all genes high). We can observe that responders are more frequent on the right, but they are not all there, and many non-responders also have a high GEP. This graph suggests that high GEP is a factor favorising response to the treatment, but not a sufficient condition.
+
+
+## 3. Test whether patients with a higher GEP score are more likely to respond
+
+To investigate whether the GEP distribution differ between responders and non responders, we first compare the two groups with a Wilcoxon test. Then we fit a logistic regression. We do not use a Cox regression: Cox models a time to event (survival), while our outcome is binary (R or NR). Logistic regression models the probability of response directly.
+
+```{r}
+# GEP score in responders vs non-responders
+
+wt <- wilcox.test(GEP ~ BOR, data = clinical)
+wt
+
+p_box <- ggplot(clinical, aes(BOR, GEP, fill = BOR)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, size = 1, alpha = 0.6) +
+  scale_fill_manual(values = c(NR = "grey70", R = "#D55E00")) +
+  labs(x = NULL, y = "GEP score",
+       subtitle = paste("Wilcoxon p =", signif(wt$p.value, 2))) +
+  theme_bw() +
+  theme(legend.position = "none")
+p_box
+ggsave(file.path(fig_dir, "gep_boxplot_response.png"), p_box, width = 4, height = 4, dpi = 300)
+```
+
+```{r}
+# Logistic regression: response ~ GEP
+
+fit <- glm(resp ~ GEP, data = clinical, family = binomial)
+summary(fit)
+
+# Odds ratio for a 1-unit increase in GEP score, with 95% CI
+exp(cbind(OR = coef(fit), confint.default(fit)))["GEP", ]
+```
+
+**Analysis:**
+
+
+## 4. Interpret the result and discuss why a high GEP does not guarantee response
+
+In the paper, Ayers et al. describe the GEP as "necessary but not sufficient" for response. Non-responders fall into two groups: tumours without T-cell inflammation (cold) and inflamed tumours that still do not respond.
+We will try to check whether the same pattern is visible here.
+
+```{r}
+# Table of response rate for GEP above/below median
+
+clinical$GEP_group <- ifelse(clinical$GEP > median(clinical$GEP), "GEP high", "GEP low")
+
+tab <- table(clinical$GEP_group, clinical$BOR)
+tab
+
+# Response rate in each group (%)
+round(100 * prop.table(tab, margin = 1), 1)
+
+fisher.test(tab)
+```
+
+We obtain a promising result, suggesting that a high GEP has a positive impact on the response rate. Let's take the investigation further with a graph.
+
+TMB (tumour mutational burden) is a second biomarker. It reflects how many neoantigens the tumour can show to T cells. If the GEP is "necessary but not sufficient", we expect responders among GEP-high patients mainly when TMB is also high. TMB is missing for some patients, so they are left out of this plot.
+
+```{r}
+# GEP score versus TMB
+
+tmb_df <- clinical[!is.na(clinical$TMB), ]
+cat("Patients with TMB:", nrow(tmb_df), "of", nrow(clinical), "\n")
+
+p_tmb <- ggplot(tmb_df, aes(GEP, TMB, colour = BOR)) +
+  geom_point(size = 2, alpha = 0.8) +
+  geom_vline(xintercept = median(clinical$GEP), linetype = "dashed") +
+  geom_hline(yintercept = median(tmb_df$TMB), linetype = "dashed") +
+  scale_y_continuous(trans = "log1p") +   # log(1 + TMB), because some patients have TMB = 0
+  scale_colour_manual(values = c(NR = "grey60", R = "#D55E00")) +
+  labs(x = "GEP score", y = "TMB (log scale)", colour = "Response") +
+  theme_bw()
+p_tmb
+ggsave(file.path(fig_dir, "gep_vs_tmb.png"), p_tmb, width = 6, height = 4.5, dpi = 300)
+
+# Response rate in the four quadrants (cut at the medians)
+tmb_df$TMB_group <- ifelse(tmb_df$TMB > median(tmb_df$TMB), "TMB high", "TMB low")
+tmb_df$GEP_group <- ifelse(tmb_df$GEP > median(clinical$GEP), "GEP high", "GEP low")
+aggregate(resp ~ GEP_group + TMB_group, data = tmb_df,
+          FUN = function(x) c(n = length(x), responders = sum(x), rate = round(100 * mean(x), 1)))
+```
+
+**Analysis:**
+
+## 5. Summary and interpretation
+
+
+
+
+
+
+
