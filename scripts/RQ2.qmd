@@ -5,10 +5,10 @@ format: html
 
 Let's follow the four tasks:
 
-1. Identify the 18 GEP genes and examine their expression in the dataset
-2. Calculate a GEP score for each patient
-3. Test whether patients with a higher GEP score are more likely to respond
-4. Interpret the result and discuss why a high GEP does not guarantee response
+1.  Identify the 18 GEP genes and examine their expression in the dataset
+2.  Calculate a GEP score for each patient
+3.  Test whether patients with a higher GEP score are more likely to respond
+4.  Interpret the result and discuss why a high GEP does not guarantee response
 
 ## 0. Setup
 
@@ -63,7 +63,7 @@ GEP_genes <- c(
 )
 ```
 
-Note: this is the list from Exercise 6. The list published by Ayers et al. (2017) has CCL5 instead of PDCD1. We keep the course list here.
+Note: this is the list from Exercise 6. The list published by Ayers et al. (2017) has CCL5 instead of PDCD1. We keep the course list here
 
 ```{r}
 # Are genes present?
@@ -72,8 +72,8 @@ GEP_genes_present <- GEP_genes[GEP_genes %in% rownames(tpm)]
 
 cat("GEP genes present:", length(GEP_genes_present), "of", length(GEP_genes), "\n")
 ```
-All genes are present in the dataset (hopefully!!). Let's focus on their
-expression now
+
+All genes are present in the dataset (hopefully!!). Let's focus on their expression now
 
 We use log2(TPM + 1) and not raw counts. TPM is corrected for sequencing depth and gene length, so values can be compared between patients. The log makes the distribution less skewed.
 
@@ -130,14 +130,11 @@ p_genes
 ggsave(file.path(fig_dir, "gep_genes_boxplots.png"), p_genes, width = 10, height = 8, dpi = 300)
 ```
 
-
-**Analysis:**
-Most of the GEP genes ar overexpressed for responders: only CD276 and HLA-DQA1 aren't. They are also the two bottom ranked genes according to their GEP scores. All genes also have a signficant FDR, less than 0.05, except the last two genes and HLA-DRB1, which is the top 3 bottom ranked gene.
-
+**Analysis:** Most of the GEP genes are overexpressed in responders: only CD276 and HLA-DQA1 aren't (log2FC close to 0). They are also the two bottom ranked genes in the table, which is sorted by p-value. All genes also have a significant FDR, less than 0.05, except these two genes and HLA-DRB1, the third from the bottom.
 
 ## 2. Calculate a GEP score for each patient
 
-For this task, we use the scoring from the course (Exercise 6): standardise each gene across patients (z-score), then average the 18 z-scores for each patient. Standardising first gives every gene the same weight, so highly expressed genes such as HLA-E or STAT1 do not dominate.
+For this task, we use the scoring from the course (also from exercise 6): standardise each gene across patients (z-score), then average the 18 z-scores for each patient. Standardising first gives every gene the same weight, so highly expressed genes such as HLA-E or STAT1 do not dominate.
 
 ```{r}
 # GEP score
@@ -148,8 +145,7 @@ clinical$GEP <- colMeans(Z)
 summary(clinical$GEP)
 ```
 
-Let's try to reproduce the heatmap from the paper, with the 18 genes ordered by
-GEP score
+Let's try to reproduce the heatmap from the paper, with the 18 genes ordered by GEP score
 
 ```{r}
 #| fig-width: 10
@@ -184,9 +180,7 @@ p_heat
 ggsave(file.path(fig_dir, "gep_heatmap.png"), p_heat, width = 10, height = 5.5, dpi = 300)
 ```
 
-**Analysis:**
-The heatmap shows a clear gradient: patients go from "cold" (all genes low) to "inflamed" (all genes high). We can observe that responders are more frequent on the right, but they are not all there, and many non-responders also have a high GEP. This graph suggests that high GEP is a factor favorising response to the treatment, but not a sufficient condition.
-
+**Analysis:** The heatmap shows a clear gradient: patients go from "cold" (all genes low) to "inflamed" (all genes high). The only exceptions are HLA-DQA1 and CD276, as expected. We can observe that responders are more frequent on the right, but they are not all there, and many non-responders also have a high GEP. This graph suggests that high GEP is a factor favouring response to the treatment, but not a sufficient condition.
 
 ## 3. Test whether patients with a higher GEP score are more likely to respond
 
@@ -210,6 +204,8 @@ p_box
 ggsave(file.path(fig_dir, "gep_boxplot_response.png"), p_box, width = 4, height = 4, dpi = 300)
 ```
 
+The test p-value (0.00018) shows a clear association between GEP score and response: responders have higher GEP scores than non-responders.
+
 ```{r}
 # Logistic regression: response ~ GEP
 
@@ -220,13 +216,11 @@ summary(fit)
 exp(cbind(OR = coef(fit), confint.default(fit)))["GEP", ]
 ```
 
-**Analysis:**
-
+**Analysis:** The logistic regression confirms the Wilcoxon test. The GEP coefficient is positive and significant (p = 0.0003). The odds ratio is 3.1 (95% CI 1.7 to 5.8): when the GEP score increases by 1, the odds of response are multiplied by about 3. The GEP score has a standard deviation of 0.75, so 1 unit is a large step (from a "cold" to a clearly "inflamed" tumour). But the confidence interval is wide because we only have 25 responders.
 
 ## 4. Interpret the result and discuss why a high GEP does not guarantee response
 
-In the paper, Ayers et al. describe the GEP as "necessary but not sufficient" for response. Non-responders fall into two groups: tumours without T-cell inflammation (cold) and inflamed tumours that still do not respond.
-We will try to check whether the same pattern is visible here.
+In the paper, Ayers et al. describe the GEP as "necessary but not sufficient" for response. Non-responders fall into two groups: tumours without T-cell inflammation (cold) and inflamed tumours that still do not respond. We will try to check whether the same pattern is visible here.
 
 ```{r}
 # Table of response rate for GEP above/below median
@@ -242,7 +236,7 @@ round(100 * prop.table(tab, margin = 1), 1)
 fisher.test(tab)
 ```
 
-We obtain a promising result, suggesting that a high GEP has a positive impact on the response rate. Let's take the investigation further with a graph.
+We obtain again a promising result, with a significant p-value, suggesting that a high GEP has a positive impact on the response rate. Let's take the investigation further with a graph.
 
 TMB (tumour mutational burden) is a second biomarker. It reflects how many neoantigens the tumour can show to T cells. If the GEP is "necessary but not sufficient", we expect responders among GEP-high patients mainly when TMB is also high. TMB is missing for some patients, so they are left out of this plot.
 
@@ -270,13 +264,55 @@ aggregate(resp ~ GEP_group + TMB_group, data = tmb_df,
           FUN = function(x) c(n = length(x), responders = sum(x), rate = round(100 * mean(x), 1)))
 ```
 
-**Analysis:**
+**Analysis:** This plot is very informative. The two median lines split the patients into four groups: both low GEP score and TMB, high TMB and low GEP score, high GEP score and low TMB, and both high. Most of the responders (15 of the 21 with a TMB value) belong to the last group. In the "high GEP, low TMB" group, only 2 of 35 patients respond. This shows that having a high GEP score is not sufficient: having a high TMB seems to be another condition for showing response to the treatment.
+
+However, in the high TMB and high GEP score category, more than half of the patients are still non responders: it suggests that other factors are necessary to favour response. In the class we mentioned a third biomarker, the PD-1 / PD-L1 axis. PD-1 (PDCD1) is on the T cells, and PD-L1 (CD274) is the target of atezolizumab. Both genes are already part of the GEP, so they are strongly correlated with the score.But it is still informative to look at them inside the "high GEP, high TMB" group, to see if they help separate responders from non-responders.
+
+```{r}
+# Investigate PD-1 (PDCD1) and PD-L1 (CD274) expression as other co-factors
+
+# Patients with both high GEP and high TMB
+hh <- tmb_df[tmb_df$GEP_group == "GEP high" & tmb_df$TMB_group == "TMB high", ]
+table(hh$BOR)
+
+hh$PDCD1 <- logtpm["PDCD1", hh$sample_id]
+hh$CD274 <- logtpm["CD274", hh$sample_id]
+
+# Correlation of each gene with the GEP score (all patients)
+cor(logtpm["PDCD1", ], clinical$GEP, method = "spearman")
+cor(logtpm["CD274", ], clinical$GEP, method = "spearman")
+
+# R vs NR inside the "high GEP, high TMB" group
+wilcox.test(PDCD1 ~ BOR, data = hh)
+wilcox.test(CD274 ~ BOR, data = hh)
+
+hh_long <- data.frame(
+  gene = rep(c("PDCD1 (PD-1)", "CD274 (PD-L1)"), each = nrow(hh)),
+  expr = c(hh$PDCD1, hh$CD274),
+  BOR  = rep(hh$BOR, 2)
+)
+p_pd1 <- ggplot(hh_long, aes(BOR, expr, fill = BOR)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) +
+  geom_jitter(width = 0.15, size = 1, alpha = 0.6) +
+  facet_wrap(~ gene, scales = "free_y") +
+  scale_fill_manual(values = c(NR = "grey70", R = "#D55E00")) +
+  labs(x = NULL, y = "log2(TPM + 1)", subtitle = "Patients with high GEP and high TMB") +
+  theme_bw() +
+  theme(legend.position = "none")
+p_pd1
+ggsave(file.path(fig_dir, "gep_pd1_pdl1.png"), p_pd1, width = 6, height = 4, dpi = 300)
+```
+
+Inside the "high GEP, high TMB" group, responders have slightly higher PD-1 and PD-L1 expression, but the difference is not significant (p = 0.15 for PDCD1, p = 0.10 for CD274). With only 38 patients (15 responders), the test has little power. Also, both genes are highly correlated with the GEP score (rho = 0.92 and 0.83), so they bring little new information. As a conclusion, other factors, not measured by the GEP, probably matter.
 
 ## 5. Summary and interpretation
 
+**Is the GEP associated with response?** Yes. Responders have a higher GEP score than non-responders (Wilcoxon p = 0.00018). In the logistic regression, the odds of response are about 3 times higher per unit of GEP (OR 3.1, 95% CI 1.7 to 5.8). Patients above the median GEP respond in 21% of cases, against 5% below the median (Fisher p = 0.002). Most of the 18 genes go in the same directon: 15 of them are higher in responders (FDR \< 0.05). This agrees with Ayers et al. and with the course
 
+**Why does a high GEP not guarantee response?** Even in the GEP-high group, 79% of patients do not respond. The GEP is "necessary but not sufficient":
 
+**Biological explanations:**
+- The GEP measures T-cell presence, not tumour recognition. T cells can be in the tumour without recognising it. TMB is a proxy for neoantigens, and GEP and TMB give complementary information. With a high GEP but a low TMB, only 2 of 35 patients respond, but with both high, the rate rises to 39%.
+- Other resistance mechanisms: Mariathasan et al. showed that TGF-β signalling in fibroblasts excludes T cells from the tumour in IMvigor210. Other mechanisms can also block the response, for example loss of antigen presentation (B2M, HLA) or other checkpoints (LAG3, TIGIT). The GEP does not capture them, so those are probably the missing factors that I was looking for in task 4
 
-
-
-
+**Limitations.** We have only 25 responders, so the confidence intervals are wide. TMB is missing for 42 patients. Also, we work with bulk RNA-seq that mixes tumour, immune and stromal cells, so the score does not tell where the T cells are.
