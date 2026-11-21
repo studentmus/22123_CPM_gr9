@@ -1,0 +1,288 @@
+---
+title: "RQ1 (part B): heatmap of DEGs, GSEA and leading-edge genes"
+subtitle: "22123 Computational Precision Medicine — group 9"
+author: "Manuel Charneca"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Overview
+
+-   **Input:** `results/DE_R_vs_NR_all.csv` and
+    `results/processed_shared.rds` (written by script 01)
+-   **Output:** figures in `results/figures/` and tables
+    `results/gsea_*.csv`
+-   **Run order:** source `scripts/01_load_qc_deseq2.R` first, then
+    render this file.
+-   **AI disclosure:** AI was used to help define the settings,
+    aesthetics and formatting of the plots and to fix bugs.
+
+```{r setup}
+#| include: false
+# Run all code from the repository root (the folder with the .Rproj file),
+root <- normalizePath(getwd())
+while (length(list.files(root, pattern = "\\.Rproj$")) == 0 && dirname(root) != root) {
+  root <- dirname(root)
+}
+if (length(list.files(root, pattern = "\\.Rproj$")) == 0) {
+  stop("Could not find the project folder (.Rproj). Save this file inside the 22123_CPM_gr9 repo.")
+}
+knitr::opts_knit$set(root.dir = root)
+```
+
+```{r packages}
+suppressPackageStartupMessages({
+  library(fgsea)
+  library(msigdbr)
+  library(pheatmap)
+  library(ggplot2)
+  library(data.table)
+})
+
+set.seed(22123)
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+theme_set(theme_bw(base_size = 12))
+pal     <- c(NR = "#7F7F7F", R = "#D55E00")
+dir_pal <- c("up in R" = "#D55E00", "down in R" = "#0072B2")
+```
+
+## 1. Load the shared outputs of script 01
+
+```{r load}
+# Load the DESeq2 results and remove gene without name
+de       <- read.csv("results/DE_R_vs_NR_all.csv")
+de <- de[!is.na(de$gene) & de$gene != "", ]  
+shared   <- readRDS("results/processed_shared.rds")
+vst      <- shared$vst
+clinical <- shared$clinical
+
+# Keep only the differentially expressed genes (DEGs) and split them into up/down in R
+sig <- subset(de, direction != "not significant")
+up  <- sig[sig$direction == "up in R", ]
+dn  <- sig[sig$direction == "down in R", ]
+
+#number of DEGs in each direction
+cat("DEGs: up in Responders =", nrow(up), "| down in Responders =", nrow(dn), "\n")
+```
+
+## 2. Heatmap of selected DEGs
+
+2 Heatmaps of the top 20 up and top 20 down DEGs by adjusted p-value. In
+both heatmaps, genes (rows) are ordered by hierarchical clustering:
+genes that are high and low in the same patients are placed next to each
+other.
+
+The two heatmaps differ only in how the patients (columns) are ordered:
+a) **Ordered**: by response: responders first, then non-responders, b)
+**Clustered**: patients are grouped by the similarity of their
+expression, without using their response labels.
+
+```{r heatmaps}
+#Top 20 Up/down genes
+n_each    <- 20
+top_genes <- c(head(up$gene[order(up$padj)], n_each),
+               head(dn$gene[order(dn$padj)], n_each))
+
+# Z-score each gene across patients (relative high/low) and cap at ±3 so a few extreme samples do not wash out the colour scale
+zscore <- function(m, cap = 3) {
+  z <- t(scale(t(m)))
+  pmin(pmax(z, -cap), cap)
+}
+
+#Plot anotations and colors
+ann_row    <- data.frame(Direction = ifelse(top_genes %in% up$gene, "up in R", "down in R"),
+                         row.names = top_genes)
+ann_colors <- list(Response = pal, Direction = dir_pal)
+hm_colors  <- colorRampPalette(c("#2166AC", "white", "#B2182B"))(101)
+hm_breaks  <- seq(-3, 3, length.out = 102)
+
+# (a) Patients ordered by response (R first)
+ord <- order(clinical$BOR, decreasing = TRUE)
+mat <- zscore(vst[top_genes, ord])
+hm1 <- pheatmap(mat,
+         cluster_rows = TRUE, cluster_cols = FALSE,
+         gaps_col = sum(clinical$BOR == "R"),
+         show_colnames = FALSE, fontsize_row = 7,
+         annotation_col = data.frame(Response = clinical$BOR[ord], row.names = colnames(mat)),
+         annotation_row = ann_row, annotation_colors = ann_colors,
+         color = hm_colors, breaks = hm_breaks,
+         main = "Top 20 up + top 20 down DEGs (VST, z-score per gene)",
+         filename = "results/figures/heatmap_DEGs_by_response.png",
+         width = 9, height = 8)
+
+# (b) Patients clustered by expression: do responders group together on their own?
+mat2 <- zscore(vst[top_genes, ])
+hm2 <- pheatmap(mat2,
+         cluster_rows = TRUE, cluster_cols = TRUE,
+         show_colnames = FALSE, fontsize_row = 7,
+         annotation_col = data.frame(Response = clinical$BOR, row.names = colnames(mat2)),
+         annotation_row = ann_row, annotation_colors = ann_colors,
+         color = hm_colors, breaks = hm_breaks,
+         main = "Same genes, patients clustered",
+         filename = "results/figures/heatmap_DEGs_clustered.png",
+         width = 9, height = 8)
+```
+
+```{r show-heatmaps}
+#| fig-width: 9
+#| fig-height: 8
+# Draw the two heatmaps 
+grid::grid.newpage(); grid::grid.draw(hm1$gtable)
+grid::grid.newpage(); grid::grid.draw(hm2$gtable)
+```
+
+## 3. Gene set enrichment analysis (fgsea)
+
+All tested genes are ranked by the DESeq2 Wald statistic (positive =
+higher in R). GSEA uses the full ranked list without a significance
+cut-off, which helps with only 25 responders. Two MSigDB collections
+were used: **GO:BP** (collapsed to reduce redundant gene sets) and
+**Hallmark** (50 broad, curated gene sets designed to avoid redundancy).
+For the top Hallmark sets we also list the leading-edge genes: the genes
+that drive each set's enrichment.
+
+```{r gsea}
+# Rank all genes by the DESeq2 Wald statistic 
+ranks <- setNames(de$stat, de$gene)
+ranks <- sort(ranks, decreasing = TRUE)
+cat("Genes in the ranked list:", length(ranks), "\n")
+
+# Get gene sets from MSigDB  and convert them to the list format needed by fgsea
+gene_sets_h  <- msigdbr(species = "Homo sapiens", collection = "H")           
+gene_sets_h  <- split(x = gene_sets_h$gene_symbol, f = gene_sets_h$gs_name)         
+gene_sets_bp <- msigdbr(species = "Homo sapiens", collection = "C5", subcollection = "BP")
+gene_sets_bp <- split(x = gene_sets_bp$gene_symbol, f = gene_sets_bp$gs_name)
+
+# Run GSEA (fgsea) for Hallmark and GO:BP
+set.seed(22123)
+gsea_h  <- fgsea(pathways = gene_sets_h,  stats = ranks,
+                 minSize = 15, maxSize = 500, nPermSimple = 10000)
+set.seed(22123)
+gsea_bp <- fgsea(pathways = gene_sets_bp, stats = ranks,
+                 minSize = 15, maxSize = 500, nPermSimple = 10000)
+
+# Summary: how many gene sets were tested and how many are significant
+gsea_summary <- function(res, name) {
+  sig_res <- res[padj < 0.05]
+  cat(sprintf("%-8s gene sets tested: %d | padj < 0.05: %d (higher in R: %d, higher in NR: %d)\n",
+              name, nrow(res), nrow(sig_res),
+              sum(sig_res$NES > 0), sum(sig_res$NES < 0)))
+}
+gsea_summary(gsea_h,  "hallmark")
+gsea_summary(gsea_bp, "gobp")
+
+# Collapse overlapping GO:BP terms into independent main pathways 
+set.seed(22123)
+collapsed <- collapsePathways(gsea_bp[order(pval)][padj < 0.05],gene_sets_bp, ranks)
+bp_main   <- gsea_bp[pathway %in% collapsed$mainPathways]
+
+# Show the 15 most significant Hallmark gene sets
+knitr::kable(head(gsea_h[order(padj), .(pathway, NES, padj = signif(padj, 2), size)], 15),
+             digits = 3, caption = "Top 15 Hallmark gene sets")
+
+# Show the 15 most significant collapsed GO:BP gene sets (for comparison with Hallmark)
+knitr::kable(head(bp_main[order(padj), .(pathway, NES, padj = signif(padj, 2), size)], 15),
+             digits = 3, caption = "Top 15 GO:BP main pathways (after collapsing)")
+
+# Where does the first immune term appear in the collapsed GO:BP list?
+bp_up <- bp_main[NES > 0][order(padj)]
+cat("First immune/interferon GO:BP term among those higher in R is at rank",
+    which(grepl("INTERFERON|IMMUNE|T_CELL|LYMPHOCYTE", bp_up$pathway))[1], "\n")
+
+# Take the top 5 Hallmark sets higher in R and the top 5 higher in NR
+top_h <- rbind(head(gsea_h[NES > 0][order(padj)], 5),
+               head(gsea_h[NES < 0][order(padj)], 5))
+
+# Table of the leading-edge genes genes driving enrichement and which of them are DEGs
+le_tab <- data.frame(
+  pathway         = top_h$pathway,
+  NES             = round(top_h$NES, 2),
+  padj            = signif(top_h$padj, 2),
+  size            = top_h$size,
+  n_leading       = lengths(top_h$leadingEdge),
+  top_leading     = vapply(top_h$leadingEdge, function(g) paste(head(g, 15), collapse = ", "), ""),
+  DEGs_in_leading = vapply(top_h$leadingEdge, function(g) paste(intersect(g, sig$gene), collapse = ", "), ""))
+write.csv(le_tab, "results/gsea_hallmark_leading_edge.csv", row.names = FALSE)
+knitr::kable(le_tab[, c("pathway", "NES", "padj", "n_leading", "top_leading")])
+```
+
+## 4. GSEA figures
+
+For both Hallmark and GO:BP (collapsed main pathways), we show three
+figures: an NES bar plot of the 20 most significant gene sets, a GSEA
+table of the top 10 sets higher in each group, and the enrichment curve
+of the most significant set. Orange (NES \> 0) = higher in responders;
+blue (NES \< 0) = higher in non-responders.
+
+```{r gsea-plots}
+#| fig-width: 9
+#| fig-height: 6
+# Function: bar plot of NES for the 20 most significant gene sets
+plot_nes <- function(res, title) {
+  top <- head(res[order(padj)], 20)
+  top$label <- gsub("_", " ", sub("^HALLMARK_|^GOBP_", "", top$pathway))  # cleaner names
+  ggplot(top, aes(x = reorder(label, NES), y = NES, fill = NES > 0)) +
+    geom_col() + coord_flip() +
+    scale_fill_manual(values = c("TRUE" = "#D55E00", "FALSE" = "#0072B2"),
+                      labels = c("TRUE" = "higher in R", "FALSE" = "higher in NR"), name = NULL) +
+    labs(x = NULL, y = "Normalized Enrichment Score (NES)", title = title) +
+    theme_minimal()
+}
+
+# Hallmark: NES bar plot of the top 20 gene sets
+p_h <- plot_nes(gsea_h, "Hallmark gene sets (R vs NR)")
+ggsave("results/figures/gsea_hallmark_nes.png", p_h, width = 8, height = 6, dpi = 300)
+p_h
+
+# GO:BP: NES bar plot of the top 20 main pathways 
+p_bp <- plot_nes(bp_main, "GO:BP main pathways (R vs NR)")
+ggsave("results/figures/gsea_gobp_main_nes.png", p_bp, width = 9, height = 6, dpi = 300)
+p_bp
+```
+
+```{r gsea-tables}
+#| fig-width: 14
+#| fig-height: 8
+# GSEA table: top 10 Hallmark sets higher in R and top 10 higher in NR
+top_up   <- gsea_h[NES > 0][head(order(pval), n = 10), pathway]
+top_down <- gsea_h[NES < 0][head(order(pval), n = 10), pathway]
+top_tab  <- c(top_up, rev(top_down))
+plotGseaTable(gene_sets_h[top_tab], stats = ranks, fgseaRes = gsea_h, gseaParam = 0.5)
+
+# GSEA table: top 10 GO:BP main pathways higher in R and top 10 higher in NR
+top_up   <- bp_main[NES > 0][head(order(pval), n = 10), pathway]
+top_down <- bp_main[NES < 0][head(order(pval), n = 10), pathway]
+top_tab  <- c(top_up, rev(top_down))
+plotGseaTable(gene_sets_bp[top_tab], stats = ranks, fgseaRes = gsea_bp, gseaParam = 0.5)
+```
+
+```{r gsea-curves}
+#| fig-width: 7
+#| fig-height: 4
+# Enrichment curve of the most significant pathway 
+top_h_pw  <- gsea_h[order(padj)][1, pathway]
+top_bp_pw <- gsea_bp[order(padj)][1, pathway]
+
+p_curve_h <- plotEnrichment(gene_sets_h[[top_h_pw]], ranks) + labs(title = top_h_pw)
+p_curve_bp <- plotEnrichment(gene_sets_bp[[top_bp_pw]], ranks) + labs(title = top_bp_pw)
+
+ggsave("results/figures/gsea_curve_top_hallmark.png", p_curve_h,  width = 7, height = 4, dpi = 300)
+ggsave("results/figures/gsea_curve_top_gobp.png",     p_curve_bp, width = 7, height = 4, dpi = 300)
+p_curve_h
+p_curve_bp
+```
+
+## Session information
+
+```{r session}
+sessionInfo()
+```
