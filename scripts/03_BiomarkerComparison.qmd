@@ -1,0 +1,201 @@
+## [**Biomarker Comparison RQ3**]{.underline}
+
+```{r}
+#| label: load-packages
+
+library(tidyverse)
+```
+
+### 1. Data Preparation and PDCD1 Expression
+
+```{r}
+#| label: data-preparation
+
+IMvigor <- readRDS("../data/IMvigor210_plain.rds")
+
+IMvigor_clinical <- IMvigor$clinical |>
+  filter(BOR %in% c("R", "NR")) |>
+  mutate(BOR = factor(BOR, levels = c("NR", "R")))
+
+# Extract PDCD1 expression
+PDCD1_tpm <- IMvigor$tpm |>
+  data.frame() |> 
+  rownames_to_column("ID") |> 
+  filter(ID == "PDCD1") |> 
+  select(-"ID") |> 
+  unlist()
+
+# Verify sample alignment
+stopifnot(identical(IMvigor_clinical$sample_id, colnames(IMvigor$tpm)))
+
+IMvigor_relevant <- IMvigor_clinical |> 
+  mutate(PDCD1_TPM = PDCD1_tpm)
+```
+
+### 2. The Immune-related gene signature (GEP) (redone)
+
+```{r}
+#| label: gep-calculation
+
+GEP_genes <- c(
+  "CD27", "CD274", "PDCD1", "CD276", "CD8A", "CMKLR1",
+  "CXCL9", "CXCR6", "HLA-DQA1", "HLA-DRB1", "HLA-E",
+  "IDO1", "LAG3", "NKG7", "PDCD1LG2", "PSMB10", "STAT1", "TIGIT"
+)
+
+GEP_expr <- IMvigor$tpm |>
+  data.frame() |> 
+  rownames_to_column("ID") |> 
+  filter(ID %in% GEP_genes) |> 
+  column_to_rownames("ID") |> 
+  as.matrix()
+
+# Log-transform and standardize each gene across patients
+GEP_expr_log <- log2(GEP_expr + 1)
+
+GEP_expr_scaled <- t(scale(t(GEP_expr_log)))
+
+# Calculate the mean standardized expression per patient
+GEP_scores <- colMeans(GEP_expr_scaled)
+
+stopifnot(identical(IMvigor_relevant$sample_id, names(GEP_scores)))
+
+#Add to table
+IMvigor_relevant <- IMvigor_relevant |> 
+  mutate(ImmuneScoresGEP = GEP_scores)
+```
+
+### 3. Biomarker Distributions by Treatment Response
+
+#### Tumor Mutational Burden (TMB)
+
+```{r}
+#| label: fig-tmb-distribution
+
+IMvigor_relevant |> 
+  ggplot(mapping = aes(x = BOR, y = TMB, color = BOR)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.15, alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    x = "Best Overall Response",
+    y = "Tumor Mutational Burden (mutations per megabase)",
+    title = "Distribution of TMB in responses"
+  ) +
+  theme(legend.position = "none")
+```
+
+#### PDCD1 Expression
+
+```{r}
+#| label: fig-pdcd1-distribution
+
+IMvigor_relevant |> 
+  ggplot(mapping = aes(x = BOR, y = log2(PDCD1_TPM + 1), color = BOR)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.15, alpha = 0.6) + 
+  theme_minimal() +
+  labs(
+    x = "Best Overall Response",
+    y = "log2(PDCD1_TPM +1)",
+    title = "Distribution of PDCD1 in responses"
+  )
+```
+
+#### Immune-related GEP Score
+
+```{r}
+#| label: fig-gep-distribution
+
+IMvigor_relevant |> 
+  ggplot(mapping = aes(x = BOR, y = ImmuneScoresGEP, color = BOR)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.15, alpha = 0.6) + 
+  theme_minimal() +
+  labs(
+    x = "Best Overall Response",
+    y = "ImmuneScoresGEP",
+    title = "Distribution of GEP in responses"
+  )
+```
+
+### 4. Statistical Comparison
+
+Gene expression data can be skewed and contain zero values, while TMB is often right-skewed. Therefore, the Wilcoxon rank-sum test was selected to compare biomarker distributions between responders and non-responders by ranking the data rather than comparing the values directly.
+
+```{r}
+#| label: wilcoxon-tests
+
+# Compare biomarker distributions between response groups
+# NA are automatically excluded
+TMB_responseTest <- wilcox.test(TMB ~ BOR, data = IMvigor_relevant)
+PD1_responseTest <- wilcox.test(PDCD1_TPM ~ BOR, data = IMvigor_relevant)
+GEP_responseTest <- wilcox.test(ImmuneScoresGEP ~ BOR, data = IMvigor_relevant)
+```
+
+### 5. Summary of Statistical Results
+
+```{r}
+#| label: biomarker-results
+
+#MAKE A TIBBLE THAT HAS THE DATA THAT WE CARE ABOUT
+results <- tibble(
+  Biomarker = c("TMB", "PDCD1", "GEP"),
+
+  MedianR = c(
+    median(IMvigor_relevant[IMvigor_relevant$BOR == "R" & !is.na(IMvigor_relevant$TMB), ]$TMB),
+    median(IMvigor_relevant[IMvigor_relevant$BOR == "R", ]$PDCD1_TPM),
+    median(IMvigor_relevant[IMvigor_relevant$BOR == "R", ]$ImmuneScoresGEP)
+  ),
+
+  MedianNR = c(
+    median(IMvigor_relevant[IMvigor_relevant$BOR == "NR" & !is.na(IMvigor_relevant$TMB), ]$TMB),
+    median(IMvigor_relevant[IMvigor_relevant$BOR == "NR", ]$PDCD1_TPM),
+    median(IMvigor_relevant[IMvigor_relevant$BOR == "NR", ]$ImmuneScoresGEP)
+  ),
+
+  n_R = c(
+    sum(IMvigor_relevant$BOR == "R" & !is.na(IMvigor_relevant$TMB)),
+    sum(IMvigor_relevant$BOR == "R"),
+    sum(IMvigor_relevant$BOR == "R")
+  ),
+
+  n_NR = c(
+    sum(IMvigor_relevant$BOR == "NR" & !is.na(IMvigor_relevant$TMB)),
+    sum(IMvigor_relevant$BOR == "NR"),
+    sum(IMvigor_relevant$BOR == "NR")
+  ),
+
+  W = c(
+    TMB_responseTest$statistic,
+    PD1_responseTest$statistic,
+    GEP_responseTest$statistic
+  ),
+
+  p_value = c(
+    TMB_responseTest$p.value,
+    PD1_responseTest$p.value,
+    GEP_responseTest$p.value
+  )
+)
+```
+
+The table is now used to calculate additional parameters to better explain the data and results.
+
+```{r}
+#| label: adjusted-results
+
+results <- results |>
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "BH"),
+    significant = ifelse(p_adjusted < 0.05, yes = "YES", no = "NO"),
+    MedianR = round(MedianR, 3),
+    MedianNR = round(MedianNR, 3),
+    EffectSize = 1 - (2 * W)/(n_R * n_NR) 
+    #This is the Rank-biserial correlation and was used to calculate an effect size and compare the direction and magnitude
+  )
+
+results
+
+
+```
