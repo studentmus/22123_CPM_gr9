@@ -1,0 +1,190 @@
+# RQ4 - Tumor purity and immune-related biomarkers
+# Run scripts/01_load_qc_deseq2.R first (creates results/processed_shared.rds)
+#_______________________________________________________________________________
+
+# Packages
+library(ggplot2)
+library(limma)
+library(immunedeconv)
+
+# Output folder and seed 
+dir.create("results/figures", showWarnings = FALSE, recursive = TRUE)
+set.seed(42)
+
+# Plot colours
+pal <- c(NR = "#7F7F7F", R = "#D55E00")
+
+# Load data
+#_______________________________________________________________________________
+
+# Clinical data
+p <- readRDS("results/processed_shared.rds")
+clinical <- p$clinical
+
+# TPM matrix
+raw <- readRDS("data/IMvigor210_plain.rds")
+tpm <- raw$tpm
+
+# Log2 transformation
+expr <- log2(tpm + 1)
+
+# Checks
+dim(expr)
+table(clinical$BOR)
+head(rownames(expr))
+stopifnot(!any(duplicated(rownames(expr))))
+
+# Biomarkers: PDCD1 and the T cell-inflamed GEP
+#_______________________________________________________________________________
+
+# GEP gene list
+GEP_genes <- c(
+  "CD27", "CD274", "PDCD1", "CD276", "CD8A", "CMKLR1",
+  "CXCL9", "CXCR6", "HLA-DQA1", "HLA-DRB1", "HLA-E",
+  "IDO1", "LAG3", "NKG7", "PDCD1LG2", "PSMB10", "STAT1", "TIGIT"
+)
+
+# Check for missing GEP genes
+GEP_genes_present <- GEP_genes[GEP_genes %in% rownames(expr)]
+GEP_genes_missing <- setdiff(GEP_genes, rownames(expr))
+cat("GEP genes present:", length(GEP_genes_present), "of", length(GEP_genes), "\n")
+cat("Missing genes:", paste(GEP_genes_missing, collapse = ", "), "\n")
+
+# GEP score: z-score each gene, then average per patient
+GEP_expr        <- expr[GEP_genes_present, , drop = FALSE]
+GEP_expr_scaled <- t(scale(t(GEP_expr)))
+GEP_scores      <- colMeans(GEP_expr_scaled, na.rm = TRUE)
+
+# Patient table
+df <- data.frame(
+  sample_id = clinical$sample_id,
+  BOR       = clinical$BOR,
+  TMB       = clinical$TMB,
+  PD1       = expr["PDCD1", ],
+  GEP       = GEP_scores
+)
+
+# Check sample order
+dim(df)
+stopifnot(identical(names(GEP_scores), df$sample_id))
+
+#Tumor purity (ESTIMATE)
+#_______________________________________________________________________________
+
+# Run ESTIMATE
+est <- deconvolute_estimate(expr)
+rownames(est)
+
+# Add purity to the patient table
+stopifnot(all(df$sample_id %in% colnames(est)))
+df$purity <- as.numeric(est["TumorPurity", df$sample_id])
+summary(df$purity)
+
+# Correlation between purity and biomarkers
+#_______________________________________________________________________________
+
+# Spearman correlation function
+spearman <- function(x, y) {
+  ct <- cor.test(x, y, method = "spearman", exact = FALSE)
+  c(rho = unname(ct$estimate), p = ct$p.value, n = sum(complete.cases(x, y)))
+}
+
+# Correlation table
+cor_tab <- rbind(
+  PD1 = spearman(df$purity, df$PD1),
+  GEP = spearman(df$purity, df$GEP),
+  TMB = spearman(df$purity, df$TMB)
+)
+round(cor_tab, 4)
+write.csv(cor_tab, "results/RQ4_purity_correlations.csv")
+
+# Scatterplots: purity vs biomarkers
+long <- rbind(
+  data.frame(BOR = df$BOR, purity = df$purity, biomarker = "PD-1 (PDCD1)", value = df$PD1),
+  data.frame(BOR = df$BOR, purity = df$purity, biomarker = "GEP score",    value = df$GEP),
+  data.frame(BOR = df$BOR, purity = df$purity, biomarker = "TMB (mut/Mb)", value = df$TMB)
+)
+long <- subset(long, !is.na(value))
+
+p_scatter <- ggplot(long, aes(purity, value)) +
+  geom_point(aes(colour = BOR), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, colour = "black") +
+  facet_wrap(~ biomarker, scales = "free_y") +
+  scale_colour_manual(values = pal) +
+  labs(x = "Estimated tumor purity", y = NULL, colour = "Response") +
+  theme_bw(base_size = 12)
+p_scatter
+ggsave("results/figures/RQ4_purity_vs_biomarkers.png", p_scatter,
+       width = 11, height = 4, dpi = 300)
+
+# 4. Purity in responders vs non-responders
+#_______________________________________________________________________________
+
+# Wilcoxon test and medians
+wilcox.test(purity ~ BOR, data = df, exact = FALSE)
+tapply(df$purity, df$BOR, median)
+
+# Boxplot
+p_box <- ggplot(df, aes(BOR, purity, fill = BOR)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
+  scale_fill_manual(values = pal) +
+  labs(x = "Response", y = "Estimated tumor purity") +
+  theme_bw(base_size = 12) + theme(legend.position = "none")
+p_box
+ggsave("results/figures/RQ4_purity_by_response.png", p_box,
+       width = 4, height = 4, dpi = 300)
+
+#Biomarkers after removing purity from the expression data
+#_______________________________________________________________________________
+
+# Purity-adjusted expression
+expr_adj <- removeBatchEffect(expr, covariates = df$purity)
+
+# Adjusted PD-1 and GEP
+df$PD1_adj          <- expr_adj["PDCD1", ]
+GEP_expr_adj        <- expr_adj[GEP_genes_present, , drop = FALSE]
+GEP_expr_adj_scaled <- t(scale(t(GEP_expr_adj)))
+df$GEP_adj          <- colMeans(GEP_expr_adj_scaled, na.rm = TRUE)
+
+# Medians and Wilcoxon test function
+test_row <- function(x) {
+  c(median_NR = median(x[df$BOR == "NR"]),
+    median_R  = median(x[df$BOR == "R"]),
+    p_wilcox  = wilcox.test(x ~ df$BOR, exact = FALSE)$p.value)
+}
+
+# Before vs after adjustment table
+adj_tab <- rbind(
+  PD1_original = test_row(df$PD1),
+  PD1_adjusted = test_row(df$PD1_adj),
+  GEP_original = test_row(df$GEP),
+  GEP_adjusted = test_row(df$GEP_adj)
+)
+round(adj_tab, 4)
+write.csv(adj_tab, "results/RQ4_before_after_adjustment.csv")
+
+# Check: adjusted biomarkers vs purity
+round(rbind(PD1_adj = spearman(df$purity, df$PD1_adj),
+            GEP_adj = spearman(df$purity, df$GEP_adj)), 4)
+
+# Boxplots before vs after adjustment
+ba <- rbind(
+  data.frame(BOR = df$BOR, biomarker = "PD-1",  version = "Original",        value = df$PD1),
+  data.frame(BOR = df$BOR, biomarker = "PD-1",  version = "Purity-adjusted", value = df$PD1_adj),
+  data.frame(BOR = df$BOR, biomarker = "GEP",   version = "Original",        value = df$GEP),
+  data.frame(BOR = df$BOR, biomarker = "GEP",   version = "Purity-adjusted", value = df$GEP_adj)
+)
+ba$version <- factor(ba$version, levels = c("Original", "Purity-adjusted"))
+
+p_ba <- ggplot(ba, aes(BOR, value, fill = BOR)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_grid(biomarker ~ version, scales = "free_y") +
+  scale_fill_manual(values = pal) +
+  labs(x = "Response", y = "Biomarker value") +
+  theme_bw(base_size = 12) + theme(legend.position = "none")
+p_ba
+ggsave("results/figures/RQ4_before_after_adjustment.png", p_ba,
+       width = 9, height = 5, dpi = 300)
+
