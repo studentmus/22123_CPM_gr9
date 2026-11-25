@@ -5,7 +5,7 @@ Gene-expression biomarkers of immunotherapy response in IMvigor210
 
 ## Structure
 ```
-data/        IMvigor210_plain.rds   (not tracked by git — put the course file here)
+data/        IMvigor210_plain.rds
 scripts/     01_load_qc_deseq2.R    RQ1 part A: QC, filtering, VST + PCA, DESeq2, volcano
 results/     DE tables, shared processed object, sessionInfo
 results/figures/
