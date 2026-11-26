@@ -402,7 +402,7 @@ mechanisms: Mariathasan et al. showed that TGF-β signalling in
 fibroblasts excludes T cells from the tumour in IMvigor210. Other
 mechanisms can also block the response, for example loss of antigen
 presentation (B2M, HLA) or other checkpoints (LAG3, TIGIT). The GEP does
-not capture them, so those are probably the missing factors that I was
+not capture some of them, so those are probably the missing factors that I was
 looking for in task 4
 
 **Limitations.** We have only 25 responders, so the confidence intervals
