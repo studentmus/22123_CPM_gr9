@@ -13,7 +13,7 @@ execute:
 ---
 ## Overview
 
--   **Input:** `results/processed_shared.rds` (written by `RQ1.1.qmd`) and
+-   **Input:** `results/processed_shared.rds` (written by RQ1.1.qmd) and
 -   **Output:** figures in `results/figures/` and tables
     `results/RQ4_*.csv`
 -   **Run order:** render `scripts/RQ1.1.qmd` first, then render this file.
