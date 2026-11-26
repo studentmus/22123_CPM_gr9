@@ -119,6 +119,19 @@ IMvigor_relevant |>
   )
 ```
 
+Save graphs to results...
+
+```{r}
+ggsave("../results/RQ3_TMB_boxplot.png",
+       width = 6, height = 5, dpi = 300)
+
+ggsave("../results/RQ3_PDCD1_boxplot.png",
+       width = 6, height = 5, dpi = 300)
+
+ggsave("../results/RQ3_GEP_boxplot.png",
+       width = 6, height = 5, dpi = 300)
+```
+
 ### 4. Statistical Comparison
 
 Gene expression data can be skewed and contain zero values, while TMB is often right-skewed. Therefore, the Wilcoxon rank-sum test was selected to compare biomarker distributions between responders and non-responders by ranking the data rather than comparing the values directly.
@@ -197,5 +210,6 @@ results <- results |>
 
 results
 
+write_csv(results, "../results/RQ3_biomarker_comparison.csv")
 
 ```
