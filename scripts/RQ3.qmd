@@ -1,8 +1,33 @@
-## [**Biomarker Comparison RQ3**]{.underline}
+---
+title: "RQ3: Biomarker comparison (TMB, PD-1 and GEP)"
+subtitle: "22123 Computational Precision Medicine — group 9"
+author: "Group 9"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Overview
+
+-   **Input:** `data/IMvigor210_plain.rds` (TPM and clinical tables;
+    this file does not need script 01 to be run first)
+-   **Output:** boxplots and a results table (medians, Wilcoxon
+    p-values, BH-adjusted p-values and effect sizes) shown in the HTML
+    report; no files are saved to `results/`.
+-   **Comparison:** complete response (R, n = 25) vs progressive disease
+    (NR, n = 167). TMB is missing for 42 patients.
 
 ```{r}
 #| label: load-packages
-
+ 
 library(tidyverse)
 ```
 
@@ -134,7 +159,10 @@ ggsave("../results/RQ3_GEP_boxplot.png",
 
 ### 4. Statistical Comparison
 
-Gene expression data can be skewed and contain zero values, while TMB is often right-skewed. Therefore, the Wilcoxon rank-sum test was selected to compare biomarker distributions between responders and non-responders by ranking the data rather than comparing the values directly.
+Gene expression data can be skewed and contain zero values, while TMB is
+often right-skewed. Therefore, the Wilcoxon rank-sum test was selected
+to compare biomarker distributions between responders and non-responders
+by ranking the data rather than comparing the values directly.
 
 ```{r}
 #| label: wilcoxon-tests
@@ -193,7 +221,8 @@ results <- tibble(
 )
 ```
 
-The table is now used to calculate additional parameters to better explain the data and results.
+The table is now used to calculate additional parameters to better
+explain the data and results.
 
 ```{r}
 #| label: adjusted-results

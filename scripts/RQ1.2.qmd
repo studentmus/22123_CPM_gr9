@@ -1,7 +1,7 @@
 ---
 title: "RQ1 (part B): heatmap of DEGs, GSEA and leading-edge genes"
 subtitle: "22123 Computational Precision Medicine — group 9"
-author: "Manuel Charneca"
+author: "Group 9"
 date: today
 format:
   html:
@@ -18,11 +18,9 @@ editor:
 ## Overview
 
 -   **Input:** `results/DE_R_vs_NR_all.csv` and
-    `results/processed_shared.rds` (written by script 01)
+    `results/processed_shared.rds` (written by RQ1.1.qmd)
 -   **Output:** figures in `results/figures/` and tables
     `results/gsea_*.csv`
--   **Run order:** source `scripts/01_load_qc_deseq2.R` first, then
-    render this file.
 -   **AI disclosure:** AI was used to help define the settings,
     aesthetics and formatting of the plots and to fix bugs.
 

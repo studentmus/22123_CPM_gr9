@@ -1,22 +1,54 @@
-# RQ4 - Tumor purity and immune-related biomarkers
-# Run scripts/01_load_qc_deseq2.R first (creates results/processed_shared.rds)
-#_______________________________________________________________________________
+---
+title: "RQ4: tumor purity and immune-related biomarkers"
+subtitle: "22123 Computational Precision Medicine — group 9"
+author: "Group 9"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+## Overview
 
+-   **Input:** `results/processed_shared.rds` (written by RQ1.1.qmd) and
+-   **Output:** figures in `results/figures/` and tables
+    `results/RQ4_*.csv`
+-   **Run order:** render `scripts/RQ1.1.qmd` first, then render this file.
+-   **AI disclosure:** AI was used to help debug errors and format the plots.
+
+```{r setup}
+#| include: false
+# Run all code from the repository root (the folder with the .Rproj file)
+root <- normalizePath(getwd())
+while (length(list.files(root, pattern = "\\.Rproj$")) == 0 && dirname(root) != root) {
+  root <- dirname(root)
+}
+if (length(list.files(root, pattern = "\\.Rproj$")) == 0) {
+  stop("Could not find the project folder (.Rproj). Save this file inside the 22123_CPM_gr9 repo.")
+}
+knitr::opts_knit$set(root.dir = root)
+```
+
+```{r packages}
 # Packages
 library(ggplot2)
 library(limma)
 library(immunedeconv)
 
-# Output folder and seed 
+# Output folder and seed
 dir.create("results/figures", showWarnings = FALSE, recursive = TRUE)
 set.seed(42)
 
 # Plot colours
 pal <- c(NR = "#7F7F7F", R = "#D55E00")
+```
 
-# Load data
-#_______________________________________________________________________________
+## Load data
 
+```{r load}
 # Clinical data
 p <- readRDS("results/processed_shared.rds")
 clinical <- p$clinical
@@ -33,10 +65,11 @@ dim(expr)
 table(clinical$BOR)
 head(rownames(expr))
 stopifnot(!any(duplicated(rownames(expr))))
+```
 
-# Biomarkers: PDCD1 and the T cell-inflamed GEP
-#_______________________________________________________________________________
+## Biomarkers: PDCD1 and the T cell-inflamed GEP
 
+```{r biomarkers}
 # GEP gene list
 GEP_genes <- c(
   "CD27", "CD274", "PDCD1", "CD276", "CD8A", "CMKLR1",
@@ -67,10 +100,11 @@ df <- data.frame(
 # Check sample order
 dim(df)
 stopifnot(identical(names(GEP_scores), df$sample_id))
+```
 
-#Tumor purity (ESTIMATE)
-#_______________________________________________________________________________
+## Tumor purity (ESTIMATE)
 
+```{r estimate}
 # Run ESTIMATE
 est <- deconvolute_estimate(expr)
 rownames(est)
@@ -79,10 +113,11 @@ rownames(est)
 stopifnot(all(df$sample_id %in% colnames(est)))
 df$purity <- as.numeric(est["TumorPurity", df$sample_id])
 summary(df$purity)
+```
 
-# Correlation between purity and biomarkers
-#_______________________________________________________________________________
+## Correlation between purity and biomarkers
 
+```{r correlation}
 # Spearman correlation function
 spearman <- function(x, y) {
   ct <- cor.test(x, y, method = "spearman", exact = FALSE)
@@ -97,7 +132,11 @@ cor_tab <- rbind(
 )
 round(cor_tab, 4)
 write.csv(cor_tab, "results/RQ4_purity_correlations.csv")
+```
 
+```{r scatterplots}
+#| fig-width: 11
+#| fig-height: 4
 # Scatterplots: purity vs biomarkers
 long <- rbind(
   data.frame(BOR = df$BOR, purity = df$purity, biomarker = "PD-1 (PDCD1)", value = df$PD1),
@@ -116,10 +155,13 @@ p_scatter <- ggplot(long, aes(purity, value)) +
 p_scatter
 ggsave("results/figures/RQ4_purity_vs_biomarkers.png", p_scatter,
        width = 11, height = 4, dpi = 300)
+```
 
-# 4. Purity in responders vs non-responders
-#_______________________________________________________________________________
+## Purity in responders vs non-responders
 
+```{r purity-response}
+#| fig-width: 4
+#| fig-height: 4
 # Wilcoxon test and medians
 wilcox.test(purity ~ BOR, data = df, exact = FALSE)
 tapply(df$purity, df$BOR, median)
@@ -134,10 +176,11 @@ p_box <- ggplot(df, aes(BOR, purity, fill = BOR)) +
 p_box
 ggsave("results/figures/RQ4_purity_by_response.png", p_box,
        width = 4, height = 4, dpi = 300)
+```
 
-#Biomarkers after removing purity from the expression data
-#_______________________________________________________________________________
+## Biomarkers after removing purity from the expression data
 
+```{r adjustment}
 # Purity-adjusted expression
 expr_adj <- removeBatchEffect(expr, covariates = df$purity)
 
@@ -167,7 +210,11 @@ write.csv(adj_tab, "results/RQ4_before_after_adjustment.csv")
 # Check: adjusted biomarkers vs purity
 round(rbind(PD1_adj = spearman(df$purity, df$PD1_adj),
             GEP_adj = spearman(df$purity, df$GEP_adj)), 4)
+```
 
+```{r adjustment-plot}
+#| fig-width: 9
+#| fig-height: 5
 # Boxplots before vs after adjustment
 ba <- rbind(
   data.frame(BOR = df$BOR, biomarker = "PD-1",  version = "Original",        value = df$PD1),
@@ -187,4 +234,4 @@ p_ba <- ggplot(ba, aes(BOR, value, fill = BOR)) +
 p_ba
 ggsave("results/figures/RQ4_before_after_adjustment.png", p_ba,
        width = 9, height = 5, dpi = 300)
-
+```

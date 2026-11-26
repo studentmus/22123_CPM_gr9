@@ -1,15 +1,42 @@
-# =============================================================================
-# 22123 CPM group project — RQ1 (part A): data loading, QC, filtering,
-# VST + PCA, differential expression (DESeq2) R vs NR, volcano plot.
-#
-# Input : data/IMvigor210_plain.rds  (list: counts, tpm, clinical)
-# Output: results/  (figures, DE tables, shared processed objects)
-#
-# Run from the repository root:  Rscript scripts/01_load_qc_deseq2.R
-# Packages: DESeq2, apeglm, ggplot2, ggrepel
-#   BiocManager::install(c("DESeq2", "apeglm")); install.packages("ggrepel")
-# =============================================================================
+---
+title: "RQ1 (part A): data loading, QC, DESeq2 and volcano plot"
+subtitle: "22123 Computational Precision Medicine — group 9"
+author: "Group 9"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+editor:
+  markdown:
+    wrap: 72
+---
 
+## Overview
+
+-   **Input:** `data/IMvigor210_plain.rds` (list: counts, tpm, clinical)
+-   **Output:** figures in `results/figures/`, DE tables and shared
+    processed objects in `results/`
+-   **Comparison:** complete response (R, n = 25) vs progressive disease
+    (NR, n = 167) after anti-PD-L1 treatment.
+
+```{r setup}
+#| include: false
+# Run all code from the repository root (the folder with the .Rproj file)
+root <- normalizePath(getwd())
+while (length(list.files(root, pattern = "\\.Rproj$")) == 0 && dirname(root) != root) {
+  root <- dirname(root)
+}
+if (length(list.files(root, pattern = "\\.Rproj$")) == 0) {
+  stop("Could not find the project folder (.Rproj). Save this file inside the 22123_CPM_gr9 repo.")
+}
+knitr::opts_knit$set(root.dir = root)
+```
+
+```{r packages}
 suppressPackageStartupMessages({
   library(DESeq2)
   library(apeglm)
@@ -21,10 +48,15 @@ set.seed(22123)
 dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
 theme_set(theme_bw(base_size = 12))
 pal <- c(NR = "#7F7F7F", R = "#D55E00")
+```
 
-# -----------------------------------------------------------------------------
-# 1. Load data and sanity checks
-# -----------------------------------------------------------------------------
+## 1. Load data and sanity checks
+
+The counts, TPM and clinical tables must have the samples in the same
+order. Response is set as a factor with NR as reference, so a positive
+log2FC means higher in responders.
+
+```{r load}
 d        <- readRDS("data/IMvigor210_plain.rds")
 counts   <- as.matrix(d$counts)
 tpm      <- as.matrix(d$tpm)
@@ -41,10 +73,17 @@ rownames(clinical) <- clinical$sample_id
 cat("Genes x samples:", dim(counts), "\n")
 print(table(clinical$BOR))
 cat("TMB missing:", sum(is.na(clinical$TMB)), "\n")
+```
 
-# -----------------------------------------------------------------------------
-# 2. QC: library sizes and gene filtering
-# -----------------------------------------------------------------------------
+## 2. QC: library sizes and gene filtering
+
+Genes are kept if they have at least 10 counts in at least 25 samples
+(the size of the smallest group), so a gene expressed only in responders
+can still pass.
+
+```{r qc}
+#| fig-width: 4
+#| fig-height: 4
 clinical$lib_size <- colSums(counts)
 cat("Library size (M reads): ",
     paste(round(summary(clinical$lib_size) / 1e6, 1), collapse = " / "), "\n")
@@ -56,6 +95,7 @@ p_lib <- ggplot(clinical, aes(BOR, lib_size / 1e6, fill = BOR)) +
   labs(x = NULL, y = "Library size (million reads)",
        title = "Sequencing depth per sample")
 ggsave("results/figures/qc_library_size.png", p_lib, width = 4, height = 4, dpi = 300)
+p_lib
 
 # Keep genes with >= 10 counts in at least as many samples as the smallest
 # group (25 responders): a gene expressed only in responders can still pass.
@@ -64,10 +104,17 @@ keep      <- rowSums(counts >= 10) >= min_group
 cat("Genes all-zero:", sum(rowSums(counts) == 0),
     "| genes kept after filtering:", sum(keep), "of", nrow(counts), "\n")
 counts_f <- counts[keep, ]
+```
 
-# -----------------------------------------------------------------------------
-# 3. DESeq2 object, VST and PCA
-# -----------------------------------------------------------------------------
+## 3. DESeq2 object, VST and PCA
+
+The variance-stabilising transform (VST) is used only for exploration.
+PCA on the 500 most variable genes checks whether response or sequencing
+depth drives the main variation, and flags outlier samples.
+
+```{r pca}
+#| fig-width: 6
+#| fig-height: 4.5
 dds <- DESeqDataSetFromMatrix(countData = counts_f,
                               colData   = clinical,
                               design    = ~ BOR)
@@ -88,6 +135,7 @@ p_pca <- ggplot(pc_df, aes(PC1, PC2, colour = BOR)) +
   labs(x = paste0("PC1 (", pve[1], "%)"), y = paste0("PC2 (", pve[2], "%)"),
        colour = "Response", title = "PCA of VST expression (top 500 variable genes)")
 ggsave("results/figures/pca_response.png", p_pca, width = 6, height = 4.5, dpi = 300)
+p_pca
 
 p_pca_lib <- ggplot(pc_df, aes(PC1, PC2, colour = lib_size / 1e6)) +
   geom_point(size = 2, alpha = 0.8) +
@@ -95,6 +143,7 @@ p_pca_lib <- ggplot(pc_df, aes(PC1, PC2, colour = lib_size / 1e6)) +
   labs(x = paste0("PC1 (", pve[1], "%)"), y = paste0("PC2 (", pve[2], "%)"),
        colour = "Library\nsize (M)", title = "PCA coloured by sequencing depth")
 ggsave("results/figures/pca_libsize.png", p_pca_lib, width = 6, height = 4.5, dpi = 300)
+p_pca_lib
 
 # Is response or depth associated with the main axes of variation?
 cat("\nPC1 vs response (Wilcoxon p):",
@@ -109,10 +158,16 @@ z <- scale(pca$x[, 1:2])
 outl <- rownames(z)[apply(abs(z) > 4, 1, any)]
 cat("Potential PCA outliers (>4 SD):",
     if (length(outl)) paste(outl, collapse = ", ") else "none", "\n")
+```
 
-# -----------------------------------------------------------------------------
-# 4. Differential expression: R vs NR
-# -----------------------------------------------------------------------------
+## 4. Differential expression: R vs NR
+
+DESeq2 is run on the raw counts of the filtered genes. DEGs are genes
+with adjusted p \< 0.05 and \|log2FC\| ≥ 1. "Robust" DEGs also keep
+\|log2FC\| ≥ 1 with the same sign after apeglm shrinkage, which pulls
+fold changes driven by a few extreme samples towards 0.
+
+```{r deseq2}
 dds <- DESeq(dds, quiet = TRUE)
 print(resultsNames(dds))
 
@@ -161,10 +216,13 @@ cat("\nTop 20 genes by p-value:\n")
 print(head(de[, c("gene", "baseMean", "log2FC", "log2FC_shrunk", "padj")], 20), row.names = FALSE)
 cat("\nRobust DEGs:\n")
 print(de[de$robust, c("gene", "baseMean", "log2FC", "log2FC_shrunk", "padj")], row.names = FALSE)
+```
 
-# -----------------------------------------------------------------------------
-# 5. Volcano plot
-# -----------------------------------------------------------------------------
+## 5. Volcano plot and fold-change shrinkage
+
+```{r volcano}
+#| fig-width: 7
+#| fig-height: 6
 # Label: top DEGs by adjusted p-value + robust DEGs with the strongest effect
 lab <- unique(c(head(sig$gene[order(sig$padj)], 12),
                 head(de$gene[de$robust][order(-abs(de$log2FC_shrunk[de$robust]))], 12)))
@@ -184,7 +242,16 @@ p_vol <- ggplot(subset(de, !is.na(padj)),
        title = "Complete response (n=25) vs progressive disease (n=167)") +
   theme(legend.position = "top")
 ggsave("results/figures/volcano_R_vs_NR.png", p_vol, width = 7, height = 6, dpi = 300)
+p_vol
+```
 
+The plot below compares the normal (MLE) and shrunken fold changes of
+the DEGs: points near 0 on the y-axis are DEGs whose effect is driven by
+a few samples.
+
+```{r shrinkage}
+#| fig-width: 6
+#| fig-height: 5
 # MLE vs shrunken fold change: which DEGs are driven by a few samples?
 p_shr <- ggplot(subset(de, direction != "not significant"),
                 aes(log2FC, log2FC_shrunk, colour = robust)) +
@@ -200,17 +267,27 @@ p_shr <- ggplot(subset(de, direction != "not significant"),
        title = "Effect of fold-change shrinkage on DEGs") +
   theme(legend.position = "top")
 ggsave("results/figures/lfc_shrinkage.png", p_shr, width = 6, height = 5, dpi = 300)
+p_shr
+```
 
-# -----------------------------------------------------------------------------
-# 6. Shared objects for the rest of the group (RQ1 part B, RQ2-4)
-# -----------------------------------------------------------------------------
-# processed_shared.rds : VST matrix of filtered genes + clinical table
-#                        (BOR as factor, lib_size) -> heatmaps, signature scores
-# dds.rds              : fitted DESeq2 object -> enrichment / more contrasts
-# TPM stays in data/IMvigor210_plain.rds (GEP score, PDCD1).
-# Both .rds files are regenerated by this script and are not tracked by git.
+## 6. Shared objects for the rest of the group
+
+-   `processed_shared.rds`: VST matrix of the filtered genes + clinical
+    table (used for heatmaps and signature scores in RQ1 part B and
+    RQ2–4).
+-   `dds.rds`: fitted DESeq2 object.
+-   TPM stays in `data/IMvigor210_plain.rds` (used for GEP score and
+    PDCD1).
+
+```{r save}
 saveRDS(list(vst = assay(vsd), clinical = clinical), "results/processed_shared.rds")
 saveRDS(dds, "results/dds.rds")
-
 writeLines(capture.output(sessionInfo()), "results/sessionInfo_01.txt")
-cat("\nDone. Outputs written to results/\n")
+cat("Done. Outputs written to results/\n")
+```
+
+## Session information
+
+```{r session}
+sessionInfo()
+```
