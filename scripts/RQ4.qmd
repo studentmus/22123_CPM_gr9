@@ -21,14 +21,19 @@ execute:
 
 ```{r setup}
 #| include: false
-# Run all code from the repository root (the folder with the .Rproj file)
+
+# Find the repository root using the input data file
 root <- normalizePath(getwd())
-while (length(list.files(root, pattern = "\\.Rproj$")) == 0 && dirname(root) != root) {
+
+while (!file.exists(file.path(root, "data/IMvigor210_plain.rds")) &&
+       dirname(root) != root) {
   root <- dirname(root)
 }
-if (length(list.files(root, pattern = "\\.Rproj$")) == 0) {
-  stop("Could not find the project folder (.Rproj). Save this file inside the 22123_CPM_gr9 repo.")
+
+if (!file.exists(file.path(root, "data/IMvigor210_plain.rds"))) {
+  stop("Could not find the project data.")
 }
+
 knitr::opts_knit$set(root.dir = root)
 ```
 
