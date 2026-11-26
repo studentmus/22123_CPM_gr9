@@ -23,8 +23,7 @@ slides/      slides per RQ (merged into the group presentation)
 ```
 
 ## Run
-Open `22123_CPM_gr9.Rproj` (or work from the repository root) and render the
-Quarto files in this order:
+Render RQ1.1.qmd first, the rest of the Quarto files can be in ran in any order:
 
 1. `scripts/RQ1.1.qmd` — writes the shared objects used by RQ1 part B and RQ4
 2. `scripts/RQ1.2.qmd`
