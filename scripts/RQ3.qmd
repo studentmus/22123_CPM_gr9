@@ -21,7 +21,7 @@ editor:
     this file does not need script 01 to be run first)
 -   **Output:** boxplots and a results table (medians, Wilcoxon
     p-values, BH-adjusted p-values and effect sizes) shown in the HTML
-    report; no files are saved to `results/`.
+    report; relevant files are saved to `results/`.
 -   **Comparison:** complete response (R, n = 25) vs progressive disease
     (NR, n = 167). TMB is missing for 42 patients.
 
@@ -239,3 +239,9 @@ results
 write_csv(results, "../results/RQ3_biomarker_comparison.csv")
 
 ```
+
+All three biomarkers were significantly higher in responders than in
+non-responders. TMB showed the strongest association with treatment
+response, followed by GEP and PDCD1 expression, based on their effect
+sizes. However, TMB was available for fewer patients, so it is a
+limiting factor.
