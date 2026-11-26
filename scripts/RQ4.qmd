@@ -41,6 +41,12 @@ knitr::opts_knit$set(root.dir = root)
 # Packages
 library(ggplot2)
 library(limma)
+if (!requireNamespace("immunedeconv", quietly = TRUE)) {
+  if (!requireNamespace("remotes", quietly = TRUE)) {
+    install.packages("remotes")
+  }
+  remotes::install_github("omnideconv/immunedeconv", upgrade = "never")
+}
 library(immunedeconv)
 
 # Output folder and seed

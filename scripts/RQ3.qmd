@@ -108,6 +108,9 @@ IMvigor_relevant |>
     title = "Distribution of TMB in responses"
   ) +
   theme(legend.position = "none")
+
+ggsave("../results/RQ3_TMB_boxplot.png",
+       width = 6, height = 5, dpi = 300)
 ```
 
 #### PDCD1 Expression
@@ -125,6 +128,9 @@ IMvigor_relevant |>
     y = "log2(PDCD1_TPM +1)",
     title = "Distribution of PDCD1 in responses"
   )
+
+ggsave("../results/RQ3_PDCD1_boxplot.png",
+       width = 6, height = 5, dpi = 300)
 ```
 
 #### Immune-related GEP Score
@@ -142,19 +148,10 @@ IMvigor_relevant |>
     y = "ImmuneScoresGEP",
     title = "Distribution of GEP in responses"
   )
-```
-
-Save graphs to results...
-
-```{r}
-ggsave("../results/RQ3_TMB_boxplot.png",
-       width = 6, height = 5, dpi = 300)
-
-ggsave("../results/RQ3_PDCD1_boxplot.png",
-       width = 6, height = 5, dpi = 300)
 
 ggsave("../results/RQ3_GEP_boxplot.png",
        width = 6, height = 5, dpi = 300)
+
 ```
 
 ### 4. Statistical Comparison
