@@ -13,12 +13,10 @@ execute:
 ---
 ## Overview
 
--   **Input:** `results/processed_shared.rds` (written by script 01) and
-    `data/IMvigor210_plain.rds`
+-   **Input:** `results/processed_shared.rds` (written by `RQ1.1.qmd`) and
 -   **Output:** figures in `results/figures/` and tables
     `results/RQ4_*.csv`
--   **Run order:** source `scripts/01_load_qc_deseq2.R` first, then
-    render this file.
+-   **Run order:** render `scripts/RQ1.1.qmd` first, then render this file.
 -   **AI disclosure:** AI was used to help debug errors and format the plots.
 
 ```{r setup}
